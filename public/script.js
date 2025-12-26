@@ -628,6 +628,12 @@ function resetRunState() {
     didPlayGameOver = false;
     lastFrameTime = null;
 
+    leaderboardSubmittedThisRun = false;
+    leaderboardFetchedThisEnd = false;
+    leaderboardState = 'idle';
+    leaderboardError = '';
+    leaderboardTop = [];
+
     bullets = [];
     enemies = [];
     enemyBullets = [];
@@ -926,8 +932,95 @@ let bestScore = 0;
 let bestWave = 1;
 const STORAGE_KEYS = {
     bestScore: 'canvasShooter_bestScore',
-    bestWave: 'canvasShooter_bestWave'
+    bestWave: 'canvasShooter_bestWave',
+    playerName: 'canvasShooter_playerName'
 };
+
+// ================= FULL-STACK (Leaderboard via /api/leaderboard) =================
+let playerName = 'Player';
+let leaderboardState = 'idle'; // 'idle' | 'loading' | 'ready' | 'error'
+let leaderboardError = '';
+let leaderboardTop = []; // [{name, score, wave, mode, created_at}]
+let leaderboardSubmittedThisRun = false;
+let leaderboardFetchedThisEnd = false;
+
+function loadPlayerName() {
+    try {
+        const n = (localStorage.getItem(STORAGE_KEYS.playerName) ?? '').trim();
+        if (n) playerName = n.slice(0, 16);
+    } catch {}
+}
+
+function savePlayerName() {
+    try {
+        localStorage.setItem(STORAGE_KEYS.playerName, String(playerName ?? 'Player'));
+    } catch {}
+}
+
+function promptForPlayerName() {
+    const current = (playerName ?? 'Player').slice(0, 16);
+    const entered = prompt('Enter name for leaderboard (max 16 chars):', current);
+    if (entered === null) return;
+    const cleaned = String(entered).trim().replace(/\s+/g, ' ').slice(0, 16);
+    if (cleaned) {
+        playerName = cleaned;
+        savePlayerName();
+    }
+}
+
+async function leaderboardFetchTop() {
+    leaderboardState = 'loading';
+    leaderboardError = '';
+    try {
+        const res = await fetch('/api/leaderboard?limit=8', { cache: 'no-store' });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json || json.ok !== true) {
+            throw new Error((json && json.error) ? json.error : `HTTP ${res.status}`);
+        }
+        leaderboardTop = Array.isArray(json.data) ? json.data : [];
+        leaderboardState = 'ready';
+    } catch (e) {
+        leaderboardState = 'error';
+        leaderboardError = (e && e.message) ? e.message : 'Leaderboard unavailable';
+        leaderboardTop = [];
+    }
+}
+
+async function leaderboardSubmit(scoreValue, waveValue, modeValue) {
+    try {
+        const res = await fetch('/api/leaderboard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: (playerName ?? 'Player').slice(0, 16),
+                score: Number.isFinite(scoreValue) ? scoreValue : 0,
+                wave: Number.isFinite(waveValue) ? waveValue : 1,
+                mode: modeValue === 'hard' ? 'hard' : 'easy'
+            })
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json || json.ok !== true) {
+            throw new Error((json && json.error) ? json.error : `HTTP ${res.status}`);
+        }
+    } catch {
+        // Don't spam the player if backend isn't configured.
+    }
+}
+
+function handleLeaderboardEndOfRunOnce() {
+    if (!(isGameOver || isGameWon)) return;
+    if (!leaderboardFetchedThisEnd) {
+        leaderboardFetchedThisEnd = true;
+        leaderboardFetchTop();
+    }
+    if (!leaderboardSubmittedThisRun) {
+        leaderboardSubmittedThisRun = true;
+        if (!playerName || playerName === 'Player') {
+            promptForPlayerName();
+        }
+        leaderboardSubmit(score, wave, difficultyMode);
+    }
+}
 
 function loadRecords() {
     try {
@@ -1955,6 +2048,7 @@ function update(now) {
     if (isGameOver || isGameWon) {
         if (isGameOver) sfxGameOver();
         updateRecords();
+        handleLeaderboardEndOfRunOnce();
         draw(now);
         requestAnimationFrame(update);
         return;
@@ -3008,11 +3102,47 @@ function draw(now) {
 
         drawUiButton(restartButton, 'Restart');
         drawUiButton(modeButton, 'Mode');
+
+        // Leaderboard (full-stack)
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        const y0 = modeButton.y + modeButton.h + 26;
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = '16px Arial';
+        ctx.fillText('Top Scores', cx, y0);
+
+        ctx.font = '14px Arial';
+        if (leaderboardState === 'loading') {
+            ctx.fillStyle = 'rgba(255,255,255,0.75)';
+            ctx.fillText('Loading leaderboard...', cx, y0 + 20);
+        } else if (leaderboardState === 'error') {
+            ctx.fillStyle = 'rgba(255,255,255,0.65)';
+            const msg = (leaderboardError && String(leaderboardError)) ? String(leaderboardError) : 'Leaderboard unavailable';
+            ctx.fillText(msg.slice(0, 60), cx, y0 + 20);
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.fillText('Open /api/leaderboard?limit=5 to debug', cx, y0 + 40);
+        } else if (leaderboardState === 'ready' && leaderboardTop.length) {
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            for (let i = 0; i < Math.min(5, leaderboardTop.length); i++) {
+                const e = leaderboardTop[i];
+                const name = String(e.name ?? '').slice(0, 16) || 'Player';
+                const sc = Number.isFinite(e.score) ? e.score : 0;
+                const wv = Number.isFinite(e.wave) ? e.wave : 1;
+                const md = (e.mode === 'hard') ? 'D' : 'E';
+                ctx.fillText(`${i + 1}. ${name}  —  ${sc} (W${wv}, ${md})`, cx, y0 + 22 + (i + 1) * 18);
+            }
+        } else {
+            ctx.fillStyle = 'rgba(255,255,255,0.65)';
+            ctx.fillText('No scores yet', cx, y0 + 20);
+        }
+        ctx.restore();
     }
 }
 
 // ================= START =================
 loadSettings();
 loadRecords();
+loadPlayerName();
 startWave();
 requestAnimationFrame(update);
