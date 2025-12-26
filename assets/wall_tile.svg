@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect x="0" y="0" width="128" height="128" fill="#8b5a2b"/>
+  <!-- bricks -->
+  <g stroke="#3a1f10" stroke-width="6" stroke-linecap="round" opacity="0.85">
+    <path d="M0 32 H128"/>
+    <path d="M0 64 H128"/>
+    <path d="M0 96 H128"/>
+    <path d="M32 0 V32"/>
+    <path d="M96 0 V32"/>
+    <path d="M64 32 V64"/>
+    <path d="M0 64 V96"/>
+    <path d="M128 64 V96"/>
+    <path d="M32 96 V128"/>
+    <path d="M96 96 V128"/>
+  </g>
+  <!-- highlights -->
+  <g opacity="0.18">
+    <rect x="8" y="8" width="40" height="18" fill="#ffffff"/>
+    <rect x="72" y="40" width="44" height="18" fill="#ffffff"/>
+    <rect x="18" y="74" width="54" height="18" fill="#ffffff"/>
+  </g>
+</svg>

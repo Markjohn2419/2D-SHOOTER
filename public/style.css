@@ -1,0 +1,27 @@
+body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #222;
+}
+
+#gameCanvas {
+    border: 2px solid #fff;
+    background-color: #111;
+}
+
+/* Fullscreen scaling */
+#gameCanvas:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    border: none;
+}
+
+/* Safari */
+#gameCanvas:-webkit-full-screen {
+    width: 100vw;
+    height: 100vh;
+    border: none;
+}
