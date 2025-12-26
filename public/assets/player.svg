@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9f2ff"/>
+      <stop offset="1" stop-color="#7fb3ff"/>
+    </linearGradient>
+  </defs>
+  <!-- body -->
+  <path d="M64 10 L86 52 L86 94 L64 118 L42 94 L42 52 Z" fill="url(#g)" stroke="#0b1b33" stroke-width="6" stroke-linejoin="round"/>
+  <!-- cockpit -->
+  <path d="M64 26 L74 52 L64 70 L54 52 Z" fill="#ffcf4d" stroke="#0b1b33" stroke-width="5" stroke-linejoin="round"/>
+  <!-- wings -->
+  <path d="M42 58 L18 72 L42 86" fill="#4de3c1" stroke="#0b1b33" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M86 58 L110 72 L86 86" fill="#4de3c1" stroke="#0b1b33" stroke-width="6" stroke-linejoin="round"/>
+  <!-- thruster -->
+  <path d="M54 100 L64 118 L74 100" fill="#ff5a5a" stroke="#0b1b33" stroke-width="6" stroke-linejoin="round"/>
+</svg>

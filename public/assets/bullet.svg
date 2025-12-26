@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="16" viewBox="0 0 64 16">
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d9d9d9"/>
+      <stop offset="0.35" stop-color="#ffffff"/>
+      <stop offset="0.7" stop-color="#bfbfbf"/>
+      <stop offset="1" stop-color="#8f8f8f"/>
+    </linearGradient>
+    <linearGradient id="tip" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd4a6"/>
+      <stop offset="1" stop-color="#c07a2f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Body -->
+  <rect x="10" y="4" width="42" height="8" rx="4" fill="url(#metal)" stroke="#2b2b2b" stroke-width="1"/>
+
+  <!-- Tip -->
+  <path d="M52 4 L62 8 L52 12 Z" fill="url(#tip)" stroke="#2b2b2b" stroke-width="1"/>
+
+  <!-- Base ring -->
+  <rect x="8" y="4" width="4" height="8" rx="2" fill="#666" stroke="#2b2b2b" stroke-width="1"/>
+
+  <!-- Highlight -->
+  <path d="M14 6 C26 4.8, 36 4.8, 48 6" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="1.2" stroke-linecap="round"/>
+</svg>

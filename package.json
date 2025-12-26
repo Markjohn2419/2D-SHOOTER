@@ -3,7 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "start": "node tools/dev_server.js"
+    "start": "node tools/dev_server.js",
+    "build": "node tools/copy_assets_to_public.js"
   },
   "devDependencies": {
     "http-server": "^14.1.1"

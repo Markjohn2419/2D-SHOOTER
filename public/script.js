@@ -18,16 +18,16 @@ function loadSprite(src) {
 }
 
 const SPRITES = {
-    player: loadSprite('../assets/player.svg'),
-    bullet: loadSprite('../assets/bullet.svg'),
-    floor: loadSprite('../assets/floor_tile.svg'),
-    wall: loadSprite('../assets/wall_tile.svg'),
+    player: loadSprite('./assets/player.svg'),
+    bullet: loadSprite('./assets/bullet.svg'),
+    floor: loadSprite('./assets/floor_tile.svg'),
+    wall: loadSprite('./assets/wall_tile.svg'),
     enemy: {
-        small: loadSprite('../assets/enemy_small.svg'),
-        medium: loadSprite('../assets/enemy_medium.svg'),
-        big: loadSprite('../assets/enemy_big.svg'),
-        shooter: loadSprite('../assets/enemy_shooter.svg'),
-        splitter: loadSprite('../assets/enemy_splitter.svg')
+            small: loadSprite('./assets/enemy_small.svg'),
+            medium: loadSprite('./assets/enemy_medium.svg'),
+            big: loadSprite('./assets/enemy_big.svg'),
+            shooter: loadSprite('./assets/enemy_shooter.svg'),
+            splitter: loadSprite('./assets/enemy_splitter.svg')
     }
 };
 

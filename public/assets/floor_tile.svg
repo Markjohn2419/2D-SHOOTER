@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect x="0" y="0" width="128" height="128" fill="#141414"/>
+  <!-- subtle tile grid -->
+  <g opacity="0.35" stroke="#2a2a2a" stroke-width="4">
+    <path d="M0 32 H128"/>
+    <path d="M0 64 H128"/>
+    <path d="M0 96 H128"/>
+    <path d="M32 0 V128"/>
+    <path d="M64 0 V128"/>
+    <path d="M96 0 V128"/>
+  </g>
+  <!-- a few scuffs -->
+  <g opacity="0.22" stroke="#3a3a3a" stroke-width="5" stroke-linecap="round">
+    <path d="M18 22 L34 14"/>
+    <path d="M86 40 L108 30"/>
+    <path d="M46 92 L66 106"/>
+    <path d="M92 98 L112 112"/>
+  </g>
+</svg>
