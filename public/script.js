@@ -6,6 +6,55 @@ const ctx = canvas.getContext('2d');
 if (!ctx) {
     throw new Error('2D context unavailable');
 }
+const gameContainer = document.getElementById('gameContainer');
+
+const BASE_CANVAS_WIDTH = canvas.width;
+const BASE_CANVAS_HEIGHT = canvas.height;
+
+function isMobileViewport() {
+    return window.matchMedia('(pointer:coarse)').matches || window.innerWidth <= 900;
+}
+
+function applyResponsiveScaling() {
+    if (!canvas || !gameContainer) return;
+    if (isFullscreen()) {
+        canvas.style.width = '';
+        canvas.style.height = '';
+        gameContainer.style.maxWidth = '';
+        gameContainer.style.maxHeight = '';
+        return;
+    }
+    if (!isMobileViewport()) {
+        canvas.style.width = '';
+        canvas.style.height = '';
+        gameContainer.style.maxWidth = '';
+        gameContainer.style.maxHeight = '';
+        return;
+    }
+
+    const padding = 28;
+    const viewportWidth = Math.max(320, window.innerWidth - padding);
+    const viewportHeight = Math.max(440, window.innerHeight - padding);
+    const targetRatio = BASE_CANVAS_HEIGHT / BASE_CANVAS_WIDTH;
+    let width = viewportWidth;
+    let height = width * targetRatio;
+    if (height > viewportHeight) {
+        height = viewportHeight;
+        width = height / targetRatio;
+    }
+
+    canvas.style.width = `${Math.floor(width)}px`;
+    canvas.style.height = `${Math.floor(height)}px`;
+    gameContainer.style.maxWidth = `${Math.floor(width)}px`;
+    gameContainer.style.maxHeight = `${Math.floor(height)}px`;
+}
+
+const uiOverlay = document.getElementById('uiOverlay');
+const namePanel = document.getElementById('namePanel');
+const playerNameInput = document.getElementById('playerNameInput');
+const btnNameContinue = document.getElementById('btnNameContinue');
+const startBestText = document.getElementById('startBestText');
+let nameConfirmed = false;
 
 // ================= SPRITES (simple models) =================
 function loadSprite(src) {
@@ -180,11 +229,13 @@ function generateObstaclesForWave(waveNumber) {
 
 // ================= PLAYER =================
 const BASE_PLAYER_SPEED = 5;
+const BASE_PLAYER_POWER = 1.0;
 let player = {
     x: canvas.width / 2,
     y: canvas.height / 2,
     size: 20,
     speed: BASE_PLAYER_SPEED,
+    power: BASE_PLAYER_POWER,
     angle: 0
 };
 
@@ -353,13 +404,15 @@ function getEnemyTypeKeyFromType(type) {
 let isGameOver = false;
 let isGameWon = false;
 const MAX_WAVE = 50;
+const HEART_REWARD_INTERVAL = 5;
+const HEART_REWARD_AMOUNT = 2;
 
 // Start screen: game should not begin until Play is pressed.
 let hasStarted = false;
 let startPage = 'main'; // 'main' | 'mode'
 
 // Mode screen options
-let practiceStartWave = 1; // 1 (off) | 5 | 10
+let practiceStartWave = 1; // 1..MAX_WAVE (start wave selection)
 let selectedStartWave = 1;
 
 let isPaused = false;
@@ -399,6 +452,8 @@ const playButton = { x: 0, y: 0, w: 0, h: 0 };
 const easyModeButton = { x: 0, y: 0, w: 0, h: 0 };
 const difficultModeButton = { x: 0, y: 0, w: 0, h: 0 };
 const practiceButton = { x: 0, y: 0, w: 0, h: 0 };
+const practiceMinusButton = { x: 0, y: 0, w: 0, h: 0 };
+const practicePlusButton = { x: 0, y: 0, w: 0, h: 0 };
 const restartButton = { x: 0, y: 0, w: 0, h: 0 };
 const modeButton = { x: 0, y: 0, w: 0, h: 0 };
 
@@ -557,17 +612,20 @@ function handlePausedClick(p) {
 }
 
 function layoutButtons() {
-    // Menu button (top-left)
-    menuButton.w = 46;
-    menuButton.h = 34;
-    menuButton.x = 12;
-    menuButton.y = 10;
+    const btnTop = 10;
+    const btnMargin = 12;
+    const btnW = 46;
+    const btnH = 34;
 
-    // Fullscreen button (top-right)
-    fullscreenButton.w = 46;
-    fullscreenButton.h = 34;
-    fullscreenButton.x = canvas.width - fullscreenButton.w - 12;
-    fullscreenButton.y = 10;
+    fullscreenButton.w = btnW;
+    fullscreenButton.h = btnH;
+    fullscreenButton.x = canvas.width - btnMargin - btnW;
+    fullscreenButton.y = btnTop;
+
+    menuButton.w = btnW;
+    menuButton.h = btnH;
+    menuButton.x = fullscreenButton.x - btnMargin - btnW;
+    menuButton.y = btnTop;
 }
 
 function layoutStartUi() {
@@ -598,6 +656,19 @@ function layoutModeSelectUi() {
     practiceButton.h = 44;
     practiceButton.x = cx - btnW / 2;
     practiceButton.y = difficultModeButton.y + difficultModeButton.h + 14;
+
+    // +/- buttons to adjust practice wave (better than typing on mobile).
+    const stepBtn = 44;
+    const sideGap = 10;
+    practiceMinusButton.w = stepBtn;
+    practiceMinusButton.h = stepBtn;
+    practiceMinusButton.x = practiceButton.x - sideGap - stepBtn;
+    practiceMinusButton.y = practiceButton.y;
+
+    practicePlusButton.w = stepBtn;
+    practicePlusButton.h = stepBtn;
+    practicePlusButton.x = practiceButton.x + practiceButton.w + sideGap;
+    practicePlusButton.y = practiceButton.y;
 }
 
 function layoutGameOverUi() {
@@ -633,8 +704,8 @@ function resetRunState() {
     leaderboardState = 'idle';
     leaderboardError = '';
     leaderboardTop = [];
-
-    bullets = [];
+    lastRunCachedThisEnd = false;
+    lastRunEntry = null;
     enemies = [];
     enemyBullets = [];
     powerUps = [];
@@ -738,7 +809,8 @@ function drawMenuIcon(x, y, w, h) {
 }
 
 function isFullscreen() {
-    return document.fullscreenElement === canvas || document.webkitFullscreenElement === canvas;
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    return fsEl === (gameContainer || canvas);
 }
 
 function toggleFullscreen() {
@@ -749,13 +821,15 @@ function toggleFullscreen() {
         return;
     }
 
-    if (canvas.requestFullscreen) return canvas.requestFullscreen();
-    if (canvas.webkitRequestFullscreen) return canvas.webkitRequestFullscreen();
+    const target = gameContainer || canvas;
+    if (target.requestFullscreen) return target.requestFullscreen();
+    if (target.webkitRequestFullscreen) return target.webkitRequestFullscreen();
 }
 
 document.addEventListener('fullscreenchange', () => {
     // Keep keyboard controls working
     canvas.focus?.();
+    applyResponsiveScaling();
 });
 
 function getMousePos(canvas, evt) {
@@ -943,6 +1017,124 @@ let leaderboardError = '';
 let leaderboardTop = []; // [{name, score, wave, mode, created_at}]
 let leaderboardSubmittedThisRun = false;
 let leaderboardFetchedThisEnd = false;
+let lastRunEntry = null;
+let lastRunCachedThisEnd = false;
+
+const LOCAL_LEADERBOARD_KEY = 'canvasShooter_localLeaderboard';
+const LOCAL_LEADERBOARD_MAX = 12;
+let localLeaderboardCache = [];
+
+function compareLeaderboardEntries(a, b) {
+    if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
+    if ((b.wave ?? 0) !== (a.wave ?? 0)) return (b.wave ?? 0) - (a.wave ?? 0);
+    const at = Date.parse(a.created_at ?? '') || 0;
+    const bt = Date.parse(b.created_at ?? '') || 0;
+    return at - bt;
+}
+
+function loadLocalLeaderboardEntries() {
+    try {
+        const raw = localStorage.getItem(LOCAL_LEADERBOARD_KEY);
+        if (!raw) return [];
+        const json = JSON.parse(raw);
+        if (!Array.isArray(json)) return [];
+        return json.sort(compareLeaderboardEntries);
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveLocalLeaderboardEntries(entries) {
+    try {
+        localStorage.setItem(LOCAL_LEADERBOARD_KEY, JSON.stringify(entries));
+    } catch (e) {
+        // Ignore storage issues (e.g., Safari private mode)
+    }
+}
+
+function cacheLeaderboardEntryLocally(entry) {
+    if (!entry) return;
+    lastRunEntry = entry;
+    localLeaderboardCache = [entry, ...localLeaderboardCache].sort(compareLeaderboardEntries).slice(0, LOCAL_LEADERBOARD_MAX);
+    saveLocalLeaderboardEntries(localLeaderboardCache);
+}
+
+function mergeWithLocalEntries(entries) {
+    const combined = [...entries, ...localLeaderboardCache];
+    combined.sort(compareLeaderboardEntries);
+    return combined;
+}
+
+localLeaderboardCache = loadLocalLeaderboardEntries();
+
+function buildLeaderboardEntry(scoreValue, waveValue, modeValue) {
+    const sanitizedName = (playerName ?? 'Player').slice(0, 16);
+    const score = Number.isFinite(scoreValue) ? scoreValue : 0;
+    const wave = Number.isFinite(waveValue) ? waveValue : 1;
+    const mode = modeValue === 'hard' ? 'hard' : 'easy';
+    return { name: sanitizedName, score, wave, mode, created_at: new Date().toISOString() };
+}
+
+function recordLatestRunEntry(scoreValue, waveValue, modeValue) {
+    if (lastRunCachedThisEnd && lastRunEntry) return lastRunEntry;
+    const entry = buildLeaderboardEntry(scoreValue, waveValue, modeValue);
+    cacheLeaderboardEntryLocally(entry);
+    lastRunCachedThisEnd = true;
+    return entry;
+}
+
+function sanitizePlayerName(value) {
+    return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 16);
+}
+
+function updateStartBestText() {
+    if (!startBestText) return;
+    startBestText.textContent = `Best Score: ${bestScore} · Best Wave: ${bestWave}`;
+}
+
+function updateNameButtonState() {
+    if (!btnNameContinue || !playerNameInput) return;
+    btnNameContinue.disabled = sanitizePlayerName(playerNameInput.value).length === 0;
+}
+
+function showNamePrompt() {
+    if (!uiOverlay) return;
+    uiOverlay.hidden = false;
+    if (namePanel) namePanel.hidden = false;
+    playerNameInput?.focus();
+}
+
+function hideNamePrompt() {
+    if (!uiOverlay) return;
+    uiOverlay.hidden = true;
+    if (namePanel) namePanel.hidden = true;
+}
+
+function confirmNameFromOverlay() {
+    if (!playerNameInput) return;
+    const cleaned = sanitizePlayerName(playerNameInput.value);
+    if (!cleaned) return;
+    playerName = cleaned;
+    savePlayerName();
+    nameConfirmed = true;
+    hideNamePrompt();
+}
+
+function hookNamePrompt() {
+    if (playerNameInput) {
+        playerNameInput.value = sanitizePlayerName(playerName);
+        playerNameInput.addEventListener('input', updateNameButtonState);
+        playerNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmNameFromOverlay();
+            }
+        });
+    }
+    if (btnNameContinue) btnNameContinue.addEventListener('click', confirmNameFromOverlay);
+    updateNameButtonState();
+    showNamePrompt();
+}
 
 function loadPlayerName() {
     try {
@@ -957,46 +1149,51 @@ function savePlayerName() {
     } catch {}
 }
 
-function promptForPlayerName() {
-    const current = (playerName ?? 'Player').slice(0, 16);
-    const entered = prompt('Enter name for leaderboard (max 16 chars):', current);
-    if (entered === null) return;
-    const cleaned = String(entered).trim().replace(/\s+/g, ' ').slice(0, 16);
-    if (cleaned) {
-        playerName = cleaned;
-        savePlayerName();
-    }
+function setPracticeStartWave(v) {
+    const n = Number.parseInt(String(v), 10);
+    if (!Number.isFinite(n)) return;
+    practiceStartWave = Math.max(1, Math.min(MAX_WAVE, n));
+}
+
+function bumpPracticeStartWave(delta) {
+    setPracticeStartWave((practiceStartWave ?? 1) + delta);
 }
 
 async function leaderboardFetchTop() {
+    const limit = 8;
     leaderboardState = 'loading';
     leaderboardError = '';
+    localLeaderboardCache = loadLocalLeaderboardEntries();
     try {
         const res = await fetch('/api/leaderboard?limit=8', { cache: 'no-store' });
         const json = await res.json().catch(() => null);
         if (!res.ok || !json || json.ok !== true) {
             throw new Error((json && json.error) ? json.error : `HTTP ${res.status}`);
         }
-        leaderboardTop = Array.isArray(json.data) ? json.data : [];
+        const remote = Array.isArray(json.data) ? json.data : [];
+        const combined = mergeWithLocalEntries(remote);
+        leaderboardTop = combined.slice(0, limit);
         leaderboardState = 'ready';
     } catch (e) {
-        leaderboardState = 'error';
+        leaderboardTop = localLeaderboardCache.slice(0, limit);
+        leaderboardState = leaderboardTop.length ? 'ready' : 'error';
         leaderboardError = (e && e.message) ? e.message : 'Leaderboard unavailable';
-        leaderboardTop = [];
     }
 }
 
-async function leaderboardSubmit(scoreValue, waveValue, modeValue) {
+async function leaderboardSubmit(entry) {
+    if (!entry) return;
+    const payload = {
+        name: (entry.name ?? 'Player').slice(0, 16),
+        score: Number.isFinite(entry.score) ? entry.score : 0,
+        wave: Number.isFinite(entry.wave) ? entry.wave : 1,
+        mode: entry.mode === 'hard' ? 'hard' : 'easy'
+    };
     try {
         const res = await fetch('/api/leaderboard', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: (playerName ?? 'Player').slice(0, 16),
-                score: Number.isFinite(scoreValue) ? scoreValue : 0,
-                wave: Number.isFinite(waveValue) ? waveValue : 1,
-                mode: modeValue === 'hard' ? 'hard' : 'easy'
-            })
+            body: JSON.stringify(payload)
         });
         const json = await res.json().catch(() => null);
         if (!res.ok || !json || json.ok !== true) {
@@ -1009,16 +1206,16 @@ async function leaderboardSubmit(scoreValue, waveValue, modeValue) {
 
 function handleLeaderboardEndOfRunOnce() {
     if (!(isGameOver || isGameWon)) return;
+    const entry = recordLatestRunEntry(score, wave, difficultyMode);
     if (!leaderboardFetchedThisEnd) {
         leaderboardFetchedThisEnd = true;
         leaderboardFetchTop();
     }
     if (!leaderboardSubmittedThisRun) {
         leaderboardSubmittedThisRun = true;
-        if (!playerName || playerName === 'Player') {
-            promptForPlayerName();
-        }
-        leaderboardSubmit(score, wave, difficultyMode);
+        leaderboardSubmit(entry).finally(() => {
+            leaderboardFetchTop();
+        });
     }
 }
 
@@ -1032,6 +1229,7 @@ function loadRecords() {
         bestScore = 0;
         bestWave = 1;
     }
+    updateStartBestText();
 }
 
 function saveRecords() {
@@ -1052,6 +1250,7 @@ function updateRecords() {
         changed = true;
     }
     if (changed) saveRecords();
+    if (changed) updateStartBestText();
 }
 
 // ================= SOUND (WebAudio) =================
@@ -1332,6 +1531,7 @@ canvas.addEventListener('click', (e) => {
     layoutButtons();
 
     if (!hasStarted) {
+        if (!nameConfirmed) return;
         layoutStartUi();
         layoutModeSelectUi();
 
@@ -1341,6 +1541,7 @@ canvas.addEventListener('click', (e) => {
         }
 
         if (startPage === 'main') {
+            if (!nameConfirmed) return;
             if (pointInRect(p.x, p.y, playButton)) {
                 startPage = 'mode';
             }
@@ -1367,8 +1568,17 @@ canvas.addEventListener('click', (e) => {
             resetRunState();
             return;
         }
+        if (pointInRect(p.x, p.y, practiceMinusButton)) {
+            bumpPracticeStartWave(-1);
+            return;
+        }
+        if (pointInRect(p.x, p.y, practicePlusButton)) {
+            bumpPracticeStartWave(1);
+            return;
+        }
         if (pointInRect(p.x, p.y, practiceButton)) {
-            practiceStartWave = (practiceStartWave === 1) ? 5 : (practiceStartWave === 5 ? 10 : 1);
+            // Quick reset to standard start.
+            setPracticeStartWave(1);
             return;
         }
         return;
@@ -1491,8 +1701,16 @@ function handlePointerLikeTap(pos) {
             return true;
         }
 
+        if (pointInRect(pos.x, pos.y, practiceMinusButton)) {
+            bumpPracticeStartWave(-1);
+            return true;
+        }
+        if (pointInRect(pos.x, pos.y, practicePlusButton)) {
+            bumpPracticeStartWave(1);
+            return true;
+        }
         if (pointInRect(pos.x, pos.y, practiceButton)) {
-            practiceStartWave = (practiceStartWave === 1) ? 5 : (practiceStartWave === 5 ? 10 : 1);
+            setPracticeStartWave(1);
             return true;
         }
 
@@ -1525,6 +1743,8 @@ function handlePointerLikeTap(pos) {
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
+
+    if (!nameConfirmed) return;
 
     const now = getGameNow();
     for (const t of Array.from(e.changedTouches)) {
@@ -1644,10 +1864,15 @@ const POWERUP_RADIUS = 10;
 const POWERUP_DROP_CHANCE = 0.25;
 const POWERUP_DURATION_MS = 10000;
 const POWERUP_LIFETIME_MS = 10000;
+const POWERUP_LIFETIME_INCREMENT_MS = 2000;
 
 // Allow only 2 active timed power-ups at once; picking a third replaces the oldest.
 const TIMED_POWER_TYPES = ['fastFire', 'pierce', 'speed'];
 let timedPowerOrder = []; // oldest -> newest
+
+function getPowerUpLifetimeMs() {
+    return POWERUP_LIFETIME_MS + Math.max(0, wave - 1) * POWERUP_LIFETIME_INCREMENT_MS;
+}
 
 function isTimedPowerActive(type, now) {
     if (type === 'fastFire') return now < fastFireUntil;
@@ -1703,31 +1928,84 @@ let pierceUntil = 0;
 let speedUntil = 0;
 
 const POWERUP_TYPES = {
-    fastFire: { label: 'F', color: 'orange' },
-    pierce: { label: 'P', color: 'white' },
-    speed: { label: 'S', color: 'cyan' },
-    shield: { label: 'SH', color: 'yellow' },
-    heart: { label: '♥', color: 'pink' }
+    fastFire: {
+        label: 'F',
+        color: 'orange',
+        description: 'Rapid fire',
+        floatFreq: 0.0028,
+        floatAmp: 6,
+        powerBonus: 0.25
+    },
+    pierce: {
+        label: 'P',
+        color: 'white',
+        description: 'Piercing rounds',
+        floatFreq: 0.0031,
+        floatAmp: 5.5,
+        powerBonus: 0.45
+    },
+    speed: {
+        label: 'S',
+        color: 'cyan',
+        description: 'Burst speed',
+        floatFreq: 0.0033,
+        floatAmp: 5.5,
+        speedBonus: 0.45,
+        powerBonus: 0.12
+    },
+    shield: {
+        label: 'SH',
+        color: 'yellow',
+        description: 'Shield shell',
+        floatFreq: 0.0024,
+        floatAmp: 4.8
+    },
+    heart: {
+        label: '♥',
+        color: 'pink',
+        description: 'Restore a heart',
+        floatFreq: 0.0020,
+        floatAmp: 4
+    }
 };
+
+const POWERUP_FLOAT_FREQ_DEFAULT = 0.0025;
+const POWERUP_FLOAT_AMP_DEFAULT = 5;
+
+function createPowerUpEntity(x, y, type) {
+    const now = getGameNow();
+    const expiresAt = now + getPowerUpLifetimeMs();
+    const floatPhase = Math.random() * Math.PI * 2;
+    powerUps.push({ x, y, type, expiresAt, floatPhase });
+    if (powerUps.length > 60) powerUps.splice(0, powerUps.length - 60);
+}
+
+function getPlayerPower(now) {
+    let power = BASE_PLAYER_POWER;
+    if (isTimedPowerActive('fastFire', now)) power += POWERUP_TYPES.fastFire?.powerBonus ?? 0;
+    if (isTimedPowerActive('pierce', now)) power += POWERUP_TYPES.pierce?.powerBonus ?? 0;
+    if (isTimedPowerActive('speed', now)) power += POWERUP_TYPES.speed?.powerBonus ?? 0.12;
+    return power;
+}
+
+function getPlayerSpeed(now) {
+    const multiplier = now < speedUntil ? 1.45 : 1.0;
+    return player.speed * multiplier;
+}
 
 function maybeDropPowerUp(x, y) {
     if (Math.random() > POWERUP_DROP_CHANCE) return;
     // Heart spawns are wave-based, not random drops
     const keys = ['fastFire', 'pierce', 'speed', 'shield'];
     const type = keys[Math.floor(Math.random() * keys.length)];
-    const expiresAt = getGameNow() + POWERUP_LIFETIME_MS;
-    powerUps.push({ x, y, type, expiresAt });
-
-    if (powerUps.length > 60) powerUps.splice(0, powerUps.length - 60);
+    createPowerUpEntity(x, y, type);
 }
 
 function forceDropPowerUp(x, y) {
     // Heart spawns are wave-based, not forced drops
     const keys = ['fastFire', 'pierce', 'speed', 'shield'];
     const type = keys[Math.floor(Math.random() * keys.length)];
-    const expiresAt = getGameNow() + POWERUP_LIFETIME_MS;
-    powerUps.push({ x, y, type, expiresAt });
-    if (powerUps.length > 60) powerUps.splice(0, powerUps.length - 60);
+    createPowerUpEntity(x, y, type);
 }
 
 function clampEnemyToArena(enemy) {
@@ -1887,13 +2165,13 @@ function spawnHeartPowerUp() {
         }
         // Avoid spawning under the bottom HUD bar
         if (!blocked && y < canvas.height - 90) {
-            powerUps.push({ x, y, type: 'heart', expiresAt: now + POWERUP_LIFETIME_MS });
+            createPowerUpEntity(x, y, 'heart');
             return;
         }
     }
 
     // Fallback
-    powerUps.push({ x: canvas.width / 2, y: canvas.height / 2, type: 'heart', expiresAt: now + POWERUP_LIFETIME_MS });
+    createPowerUpEntity(canvas.width / 2, canvas.height / 2, 'heart');
 }
 
 function applyPowerUp(type, now) {
@@ -2058,16 +2336,26 @@ function update(now) {
     // Player movement (with obstacle collisions)
     const speedMul = now < speedUntil ? 1.45 : 1.0;
     const curSpeed = player.speed * speedMul * frameScale;
+
+    let inputX = 0;
+    let inputY = 0;
+    if (keys['a']) inputX -= 1;
+    if (keys['d']) inputX += 1;
+    if (keys['w']) inputY -= 1;
+    if (keys['s']) inputY += 1;
+    if (mobileControlsEnabled && joystick.active) {
+        inputX += joystick.dx;
+        inputY += joystick.dy;
+    }
+
     let moveX = 0;
     let moveY = 0;
-    if (keys['a']) moveX -= curSpeed;
-    if (keys['d']) moveX += curSpeed;
-    if (keys['w']) moveY -= curSpeed;
-    if (keys['s']) moveY += curSpeed;
-
-    if (mobileControlsEnabled && joystick.active) {
-        moveX += joystick.dx * curSpeed;
-        moveY += joystick.dy * curSpeed;
+    const inputLen = Math.hypot(inputX, inputY);
+    if (inputLen > 0) {
+        const normX = inputX / inputLen;
+        const normY = inputY / inputLen;
+        moveX += normX * curSpeed;
+        moveY += normY * curSpeed;
     }
 
     if (now < dashUntil) {
@@ -2190,7 +2478,7 @@ function update(now) {
             // Boss dash (windup + dash)
             const phaseDash = (difficultyMode === 'hard' && enemy.phase2);
             const dashCooldown = Math.max(900, (Math.max(1400, 2600 - wave * 18)) * (phaseDash ? 0.62 : 1.0));
-            const dashWindupMs = 260;
+            const dashWindupMs = 420;
             const dashDurationMs = phaseDash ? 220 : 190;
             const dashSpeed = Math.max(10, (14 + wave * 0.14) * (phaseDash ? 1.25 : 1.0));
 
@@ -2200,6 +2488,7 @@ function update(now) {
                     enemy.dashPending = true;
                     enemy.dashAngle = Math.atan2(dy, dx);
                     enemy.dashWindupUntil = now + dashWindupMs;
+                    enemy.dashWindupMs = dashWindupMs;
                 }
             }
 
@@ -2361,7 +2650,8 @@ function update(now) {
             const dist = Math.hypot(dx, dy);
 
             if (dist < enemies[j].r + BULLET_SIZE) {
-                enemies[j].hp -= 1;
+                const damage = getPlayerPower(now);
+                enemies[j].hp -= damage;
 
                 sfxHit();
 
@@ -2491,6 +2781,10 @@ function update(now) {
                 draw(now);
                 requestAnimationFrame(update);
                 return;
+            }
+
+            if (!isGameOver && wave % HEART_REWARD_INTERVAL === 0) {
+                hearts = Math.min(maxHeartsCap, hearts + HEART_REWARD_AMOUNT);
             }
 
             wave++;
@@ -2632,9 +2926,11 @@ function draw(now) {
 
         if (e.kind === 'boss' && e.dashPending) {
             const rem = (e.dashWindupUntil ?? 0) - now;
-            if (rem > 0) {
-                const a = Math.min(1, (260 - Math.min(260, rem)) / 260);
-                const len = 120;
+            const dashTelegraphMs = e.dashWindupMs ?? 260;
+            if (rem > 0 && dashTelegraphMs > 0) {
+                const normalized = Math.min(dashTelegraphMs, rem);
+                const a = Math.min(1, (dashTelegraphMs - normalized) / dashTelegraphMs);
+                const len = 140;
                 const ang = e.dashAngle ?? Math.atan2(player.y - e.y, player.x - e.x);
                 ctx.strokeStyle = `rgba(255,80,80,${0.15 + a * 0.55})`;
                 ctx.beginPath();
@@ -2690,10 +2986,18 @@ function draw(now) {
 
     // Power-ups
     powerUps.forEach(p => {
-        const meta = POWERUP_TYPES[p.type];
+        const meta = POWERUP_TYPES[p.type] ?? {};
+        const floatFreq = meta.floatFreq ?? POWERUP_FLOAT_FREQ_DEFAULT;
+        const floatAmp = meta.floatAmp ?? POWERUP_FLOAT_AMP_DEFAULT;
+        const phase = p.floatPhase ?? 0;
+        const bob = Math.sin((now + phase) * floatFreq) * floatAmp;
+
+        ctx.save();
+        ctx.translate(0, bob);
+
         ctx.beginPath();
         ctx.arc(p.x, p.y, POWERUP_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = meta.color;
+        ctx.fillStyle = meta.color || 'white';
         ctx.fill();
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 2;
@@ -2703,9 +3007,16 @@ function draw(now) {
         ctx.font = '12px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(meta.label, p.x, p.y);
-        ctx.textAlign = 'start';
-        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(meta.label ?? '?', p.x, p.y);
+
+        if (meta.description) {
+            ctx.font = '10px Arial';
+            ctx.fillStyle = 'rgba(255,255,255,0.75)';
+            ctx.textBaseline = 'top';
+            ctx.fillText(meta.description, p.x, p.y + POWERUP_RADIUS + 4);
+        }
+
+        ctx.restore();
     });
 
     // Player (draw last so it stays visible)
@@ -2824,6 +3135,12 @@ function draw(now) {
         ctx.fillText('WAVE CLEARED!', cx, cy);
         ctx.font = '18px Arial';
         ctx.fillText('Get ready...', cx, cy + 44);
+        if (wave % 2 === 0) {
+            const speedLabel = getPlayerSpeed(now).toFixed(1);
+            const powerLabel = getPlayerPower(now).toFixed(2);
+            ctx.font = '18px Arial';
+            ctx.fillText(`Speed ${speedLabel} · Power ${powerLabel}`, cx, cy + 74);
+        }
         ctx.restore();
     }
 
@@ -2863,11 +3180,10 @@ function draw(now) {
     ctx.fillText(hud1, canvas.width / 2, 26);
     ctx.textAlign = 'start';
 
-    // Stats move to the bottom
     const heartIcons = '♥'.repeat(Math.max(0, hearts));
     const shieldTxt = shieldCharges > 0 ? `  Shield:${shieldCharges}` : '';
     const modeTxt = difficultyMode === 'hard' ? 'Difficult' : 'Easy';
-    const hud2 = `Score: ${score} (Best: ${bestScore})   Wave: ${wave} (Best: ${bestWave})   HP: ${heartIcons}${shieldTxt}   Mode: ${modeTxt}`;
+    const hud2 = `Score: ${score} (Best: ${bestScore})   Wave: ${wave} (Best: ${bestWave})   Mode: ${modeTxt}`;
     const cd = Math.max(0, (dashCooldownUntil - now) / 1000);
     const dashTxt = cd > 0 ? `Dash CD: ${cd.toFixed(1)}s` : 'Dash: ready';
     const pu = [];
@@ -2876,28 +3192,120 @@ function draw(now) {
     if (now < speedUntil) pu.push('SPEED');
     const puTxt = pu.length ? `Power: ${pu.join(' ')}` : '';
 
-    const bottomBarH = 58;
+    const statsX = 12;
+    const statsStartY = topBarH + 12;
+    const statsSpacing = 24;
+    const hpLine = `HP: ${heartIcons || '0'}${shieldTxt}`;
+    const powerLine = puTxt || 'Power: None';
+    const dashLine = dashTxt;
+    const statsPanelPadding = 8;
+    const statsBorderColor = 'rgba(255,255,255,0.45)';
+
+    const statsEntries = [
+        { text: hpLine, color: 'rgba(220, 60, 60, 0.7)' },
+        { text: powerLine, color: 'rgba(46, 118, 255, 0.6)' },
+        { text: dashLine, color: 'rgba(255, 190, 0, 0.55)' }
+    ];
+
+    ctx.save();
+    ctx.fillStyle = 'white';
+    ctx.strokeStyle = statsBorderColor;
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = 'round';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+
+    let maxTextWidth = 0;
+    statsEntries.forEach(entry => {
+        maxTextWidth = Math.max(maxTextWidth, ctx.measureText(entry.text).width);
+    });
+    const statsPanelWidth = maxTextWidth + statsPanelPadding * 2;
+
+    statsEntries.forEach((entry, index) => {
+        const y = statsStartY + index * statsSpacing;
+        const panelX = statsX - statsPanelPadding;
+        const panelY = y - statsPanelPadding / 2;
+        const panelHeight = statsSpacing - 6;
+
+        ctx.fillStyle = entry.color;
+        ctx.fillRect(panelX, panelY, statsPanelWidth, panelHeight);
+        ctx.strokeRect(panelX, panelY, statsPanelWidth, panelHeight);
+
+        ctx.fillStyle = 'white';
+        ctx.fillText(entry.text, statsX, y);
+    });
+    ctx.restore();
+
+    const bottomBarH = 44;
     const bottomY = canvas.height - bottomBarH - 10;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.fillRect(6, bottomY, canvas.width - 12, bottomBarH);
+
+    // HUD text: keep alignment consistent and add an outline so it stays readable.
+    const lineY = bottomY + 24;
+    ctx.save();
     ctx.fillStyle = 'white';
-    ctx.fillText(hud2, 12, bottomY + 22);
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round';
+    ctx.textBaseline = 'middle';
+
+    ctx.textAlign = 'left';
+    ctx.strokeText(hud2, 12, lineY);
+    ctx.fillText(hud2, 12, lineY);
+
     const bossAlive = enemies.some(e => e.kind === 'boss');
     if (bossAlive) {
         const addsLeft = Math.max(0, bossAddsTotalThisWave - bossAddsSpawnedThisWave);
         ctx.textAlign = 'right';
-        ctx.fillText(`Adds left: ${addsLeft}`, canvas.width - 12, bottomY + 22);
-        ctx.textAlign = 'start';
+        const addsTxt = `Adds left: ${addsLeft}`;
+        ctx.strokeText(addsTxt, canvas.width - 12, lineY);
+        ctx.fillText(addsTxt, canvas.width - 12, lineY);
     }
-    ctx.fillText(dashTxt, 12, bottomY + 44);
-    if (puTxt) {
-        ctx.textAlign = 'right';
-        ctx.fillText(puTxt, canvas.width - 12, bottomY + 44);
-        ctx.textAlign = 'start';
-    }
+
+    ctx.restore();
 
     // Top buttons
     layoutButtons();
+
+    const controlPanelPadding = 6;
+    const controlPanelX = menuButton.x - controlPanelPadding;
+    const controlPanelY = menuButton.y - controlPanelPadding;
+    const controlPanelWidth = (fullscreenButton.x + fullscreenButton.w) - controlPanelX + controlPanelPadding;
+    const controlPanelHeight = menuButton.h + controlPanelPadding * 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 1.4;
+    ctx.fillRect(controlPanelX, controlPanelY, controlPanelWidth, controlPanelHeight);
+    ctx.strokeRect(controlPanelX, controlPanelY, controlPanelWidth, controlPanelHeight);
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = '11px Arial';
+    ctx.fillStyle = 'white';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('Menu', menuButton.x + menuButton.w / 2, menuButton.y - 4);
+    ctx.restore();
+
+    const fullscreenLabel = isFullscreen() ? 'Exit Fullscreen' : 'Fullscreen';
+    ctx.save();
+    ctx.font = '11px Arial';
+    const labelWidth = Math.max(84, ctx.measureText(fullscreenLabel).width + 16);
+    const labelHeight = 20;
+    const labelX = fullscreenButton.x + fullscreenButton.w / 2 - labelWidth / 2;
+    const labelY = fullscreenButton.y + fullscreenButton.h + 6;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+    ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+    ctx.fillStyle = 'white';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(fullscreenLabel, labelX + labelWidth / 2, labelY + labelHeight / 2);
+    ctx.restore();
 
     ctx.fillStyle = 'white';
     ctx.fillRect(menuButton.x, menuButton.y, menuButton.w, menuButton.h);
@@ -2930,7 +3338,10 @@ function draw(now) {
         ctx.font = '56px Arial';
         ctx.fillText('2D SHOOTER', cx, cy - 90);
 
-        if (startPage === 'main') {
+        if (!nameConfirmed) {
+            ctx.font = '18px Arial';
+            ctx.fillText('Enter your name to unlock Play', cx, cy - 40);
+        } else if (startPage === 'main') {
             ctx.font = '18px Arial';
             ctx.fillText('Press Play to start', cx, cy - 40);
         } else {
@@ -2942,25 +3353,24 @@ function draw(now) {
         const buttonsBottom = startPage === 'main'
             ? (playButton.y + playButton.h)
             : (practiceButton.y + practiceButton.h);
-        const bestTextY = Math.round(buttonsBottom + 18);
+        // On the mode page we render an extra line under Practice.
+        const bestTextY = Math.round(buttonsBottom + (startPage === 'main' ? 18 : 46));
         ctx.fillText(`Best Score: ${bestScore}   Best Wave: ${bestWave}`, cx, bestTextY);
-
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.font = '15px Arial';
-        ctx.fillText('WASD move • Mouse aim • Click shoot • Space dash', cx, bestTextY + 22);
-        ctx.fillText('Esc/Tab menu • Touch: tap to shoot (optional joystick)', cx, bestTextY + 42);
         ctx.restore();
 
-        if (startPage === 'main') {
+        if (!nameConfirmed) {
+            // Play button stays hidden until name is set.
+        } else if (startPage === 'main') {
             drawUiButton(playButton, 'Play');
         } else {
             drawUiButton(easyModeButton, 'Easy');
             drawUiButton(difficultModeButton, 'Difficult');
 
-            const practiceLabel = (practiceStartWave === 1)
-                ? 'Practice: Off'
-                : `Practice: Start at Wave ${practiceStartWave}`;
+            const practiceLabel = `Wave Start: W${practiceStartWave}`;
             drawUiButton(practiceButton, practiceLabel);
+
+            drawUiButton(practiceMinusButton, '-');
+            drawUiButton(practicePlusButton, '+');
 
             ctx.save();
             ctx.textAlign = 'center';
@@ -3017,7 +3427,12 @@ function draw(now) {
 
             ctx.fillStyle = 'rgba(255,255,255,0.9)';
             ctx.font = '16px Arial';
-            ctx.fillText('Press Esc/Tab to resume', cx, cy + 130);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            const resumeTextY = pauseRestartButton.y + pauseRestartButton.h + 22;
+            ctx.fillText('Press Esc/Tab to resume', cx, resumeTextY);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
         }
 
         if (pausePage === 'settings') {
@@ -3103,46 +3518,96 @@ function draw(now) {
         drawUiButton(restartButton, 'Restart');
         drawUiButton(modeButton, 'Mode');
 
-        // Leaderboard (full-stack)
+        const leaderboardRows = 5;
+        const rowSpacing = 24;
+        const panelWidth = Math.min(460, canvas.width - 80);
+        const panelHeight = 30 + leaderboardRows * rowSpacing;
+        const panelX = Math.max(24, cx - panelWidth / 2);
+        const panelY = 38;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(8,8,8,0.88)';
+        ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.8;
+        ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
+        ctx.restore();
+
         ctx.save();
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'alphabetic';
-        const y0 = modeButton.y + modeButton.h + 26;
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'white';
         ctx.font = '16px Arial';
-        ctx.fillText('Top Scores', cx, y0);
+        ctx.fillText('Top Scores', cx, panelY + 8);
+        ctx.restore();
 
-        ctx.font = '14px Arial';
+        const entryYStart = panelY + 32;
+        const entryX = panelX + 20;
+        const detailX = panelX + panelWidth - 20;
+
+        const displayRows = [];
         if (leaderboardState === 'loading') {
-            ctx.fillStyle = 'rgba(255,255,255,0.75)';
-            ctx.fillText('Loading leaderboard...', cx, y0 + 20);
+            displayRows.push({ type: 'message', text: 'Loading leaderboard...' });
         } else if (leaderboardState === 'error') {
-            ctx.fillStyle = 'rgba(255,255,255,0.65)';
-            const msg = (leaderboardError && String(leaderboardError)) ? String(leaderboardError) : 'Leaderboard unavailable';
-            ctx.fillText(msg.slice(0, 60), cx, y0 + 20);
-            ctx.fillStyle = 'rgba(255,255,255,0.55)';
-            ctx.fillText('Open /api/leaderboard?limit=5 to debug', cx, y0 + 40);
+            displayRows.push({ type: 'message', text: 'Leaderboard unavailable' });
         } else if (leaderboardState === 'ready' && leaderboardTop.length) {
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            for (let i = 0; i < Math.min(5, leaderboardTop.length); i++) {
+            const highlightName = String(playerName ?? '').trim().toLowerCase();
+            for (let i = 0; i < Math.min(leaderboardRows, leaderboardTop.length); i++) {
                 const e = leaderboardTop[i];
-                const name = String(e.name ?? '').slice(0, 16) || 'Player';
+                const name = (String(e.name ?? '').trim() || 'Player').slice(0, 16);
                 const sc = Number.isFinite(e.score) ? e.score : 0;
                 const wv = Number.isFinite(e.wave) ? e.wave : 1;
                 const md = (e.mode === 'hard') ? 'D' : 'E';
-                ctx.fillText(`${i + 1}. ${name}  —  ${sc} (W${wv}, ${md})`, cx, y0 + 22 + (i + 1) * 18);
+                const detail = `${sc} (W${wv}, ${md})`;
+                const match = highlightName && name.toLowerCase() === highlightName;
+                displayRows.push({
+                    type: 'entry',
+                    label: `${i + 1}. ${name}`,
+                    detail,
+                    highlight: match || i === 0
+                });
             }
         } else {
-            ctx.fillStyle = 'rgba(255,255,255,0.65)';
-            ctx.fillText('No scores yet', cx, y0 + 20);
+            displayRows.push({ type: 'message', text: 'No scores yet — submit your run!' });
+        }
+        while (displayRows.length < leaderboardRows) {
+            displayRows.push(null);
+        }
+
+        ctx.save();
+        ctx.font = '14px Arial';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < leaderboardRows; i++) {
+            const rowY = entryYStart + i * rowSpacing;
+            const entry = displayRows[i];
+            if (!entry) continue;
+            if (entry.type === 'entry') {
+                const bgColor = entry.highlight ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.04)';
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(panelX + 10, rowY - 2, panelWidth - 20, rowSpacing - 4);
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'left';
+                ctx.fillText(entry.label, entryX, rowY);
+                ctx.textAlign = 'right';
+                ctx.fillText(entry.detail, detailX, rowY);
+            } else {
+                ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                ctx.textAlign = 'center';
+                ctx.fillText(entry.text, cx, rowY);
+            }
         }
         ctx.restore();
     }
 }
 
 // ================= START =================
+applyResponsiveScaling();
+window.addEventListener('resize', applyResponsiveScaling);
+window.addEventListener('orientationchange', applyResponsiveScaling);
+
 loadSettings();
 loadRecords();
 loadPlayerName();
+hookNamePrompt();
 startWave();
 requestAnimationFrame(update);

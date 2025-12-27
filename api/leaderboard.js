@@ -1,5 +1,5 @@
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const fs = require('fs');
+const path = require('path');
 
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
@@ -51,66 +51,93 @@ function cleanName(name) {
   return safe;
 }
 
-async function supabaseRequest(path, init) {
-  const url = `${SUPABASE_URL}${path}`;
-  const headers = {
-    apikey: SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-    ...init.headers,
-  };
+function getDbFilePath() {
+  const explicit = process.env.LEADERBOARD_DB_PATH;
+  if (explicit) return explicit;
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-  });
+  // Vercel serverless filesystem: only /tmp is writable.
+  if (process.env.VERCEL) return '/tmp/leaderboard.json';
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Supabase error ${res.status}: ${txt || res.statusText}`);
+  // Local dev / Node server: keep it in-repo.
+  return path.join(process.cwd(), 'data', 'leaderboard.json');
+}
+
+function ensureDirExists(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch {
+    // ignore
   }
+}
 
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+function readLeaderboardEntries(dbFilePath) {
+  try {
+    const txt = fs.readFileSync(dbFilePath, 'utf8');
+    const json = JSON.parse(txt);
+    return Array.isArray(json) ? json : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLeaderboardEntries(dbFilePath, entries) {
+  const dir = path.dirname(dbFilePath);
+  ensureDirExists(dir);
+
+  const tmpPath = `${dbFilePath}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(entries, null, 2), 'utf8');
+  fs.renameSync(tmpPath, dbFilePath);
+}
+
+function normalizeEntry(input) {
+  const name = cleanName(input?.name);
+  const score = clampInt(input?.score, 0, 1_000_000, 0);
+  const wave = clampInt(input?.wave, 1, 50, 1);
+  const mode = input?.mode === 'hard' ? 'hard' : 'easy';
+  return { name, score, wave, mode };
+}
+
+function compareEntries(a, b) {
+  // score desc, wave desc, created_at asc
+  if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
+  if ((b.wave ?? 0) !== (a.wave ?? 0)) return (b.wave ?? 0) - (a.wave ?? 0);
+
+  const at = Date.parse(a.created_at ?? '') || 0;
+  const bt = Date.parse(b.created_at ?? '') || 0;
+  return at - bt;
 }
 
 module.exports = async (req, res) => {
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return sendError(res, 503, 'Leaderboard backend is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
-    }
+    const dbFilePath = getDbFilePath();
 
     if (req.method === 'GET') {
       const url = getRequestUrl(req);
       const limit = clampInt(url.searchParams.get('limit'), 1, 25, 10);
 
-      const data = await supabaseRequest(
-        `/rest/v1/leaderboard?select=name,score,wave,mode,created_at&order=score.desc,wave.desc,created_at.asc&limit=${encodeURIComponent(String(limit))}`,
-        { method: 'GET', headers: { Accept: 'application/json' } }
-      );
-
-      return sendJson(res, 200, { ok: true, data: Array.isArray(data) ? data : [] });
+      const entries = readLeaderboardEntries(dbFilePath);
+      entries.sort(compareEntries);
+      return sendJson(res, 200, { ok: true, data: entries.slice(0, limit) });
     }
 
     if (req.method === 'POST') {
       const body = await readJsonBody(req);
       if (!body) return sendError(res, 400, 'Missing JSON body');
 
-      const name = cleanName(body.name);
-      const score = clampInt(body.score, 0, 1_000_000, 0);
-      const wave = clampInt(body.wave, 1, 50, 1);
-      const mode = body.mode === 'hard' ? 'hard' : 'easy';
+      const entry = normalizeEntry(body);
+      if (!entry.name) return sendError(res, 400, 'Name is required');
 
-      if (!name) return sendError(res, 400, 'Name is required');
+      const now = new Date().toISOString();
+      const record = { ...entry, created_at: now };
 
-      await supabaseRequest('/rest/v1/leaderboard', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal',
-        },
-        body: JSON.stringify([{ name, score, wave, mode }]),
-      });
+      const entries = readLeaderboardEntries(dbFilePath);
+      entries.push(record);
 
+      // Prevent unbounded growth.
+      entries.sort(compareEntries);
+      const capped = entries.slice(0, 200);
+
+      writeLeaderboardEntries(dbFilePath, capped);
       return sendJson(res, 200, { ok: true });
     }
 

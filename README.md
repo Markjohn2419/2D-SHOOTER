@@ -5,33 +5,26 @@
 This project includes a backend API + database leaderboard:
 
 - Backend: Vercel Serverless Function at `/api/leaderboard`
-- Database: Supabase (Postgres)
+- Storage (local dev): JSON file (`data/leaderboard.json`)
 
-### 1) Create the Supabase table
+### How it works
 
-In Supabase SQL Editor, run:
+- `GET /api/leaderboard?limit=8` returns top scores
+- `POST /api/leaderboard` accepts `{ name, score, wave, mode }`
 
-```sql
-create table if not exists public.leaderboard (
-	id bigint generated always as identity primary key,
-	created_at timestamptz not null default now(),
-	name text not null,
-	score int not null,
-	wave int not null,
-	mode text not null
-);
-```
+In local dev (`npm start`), the dev server routes `/api/leaderboard` to the Node handler in `api/leaderboard.js` and persists data in:
 
-### 2) Configure Vercel Environment Variables
+- `data/leaderboard.json`
 
-In Vercel Project Settings → Environment Variables, add:
+### Deploy note (Vercel)
 
-- `SUPABASE_URL` = your Supabase project URL (example: `https://xxxx.supabase.co`)
-- `SUPABASE_SERVICE_ROLE_KEY` = your Supabase **service role** key (keep secret)
+On Vercel, the serverless filesystem is ephemeral; the default storage path is `/tmp/leaderboard.json`, so scores are not guaranteed to persist long-term.
 
-Redeploy after setting env vars.
+If you want a persistent deployed leaderboard, run this on a Node server with a real disk and set:
 
-### 3) Verify it works
+- `LEADERBOARD_DB_PATH` to a writable persistent path
+
+### Verify it works
 
 After deploying, open:
 

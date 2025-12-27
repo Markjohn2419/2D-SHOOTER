@@ -2,7 +2,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = Number(process.env.PORT || 5173);
+const leaderboardHandler = require('../api/leaderboard');
+
+const BASE_PORT = Number(process.env.PORT || 5173);
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_ROOT = path.join(ROOT, 'public');
 
@@ -52,6 +54,27 @@ function safeResolve(urlPath) {
 const server = http.createServer((req, res) => {
   if (!req.url) return send(res, 400, 'Bad Request');
 
+  // Minimal API routing for local dev.
+  if (req.url.startsWith('/api/leaderboard')) {
+    // Store leaderboard data in-repo for local dev.
+    process.env.LEADERBOARD_DB_PATH = process.env.LEADERBOARD_DB_PATH || path.join(ROOT, 'data', 'leaderboard.json');
+    return leaderboardHandler(req, res);
+  }
+
+  // Minimal API routing for local dev.
+  // Mirrors Vercel's /api/leaderboard serverless function.
+  if (req.url === '/api/leaderboard' || req.url.startsWith('/api/leaderboard?')) {
+    try {
+      // Ensure the API uses the same persistent file across restarts.
+      process.env.LEADERBOARD_DB_PATH = process.env.LEADERBOARD_DB_PATH || path.join(ROOT, 'data', 'leaderboard.json');
+      // eslint-disable-next-line global-require
+      const handler = require(path.join(ROOT, 'api', 'leaderboard.js'));
+      return handler(req, res);
+    } catch (e) {
+      return send(res, 500, `API Error: ${e?.message || 'Unknown error'}`);
+    }
+  }
+
   const urlPath = req.url === '/' ? '/index.html' : req.url;
   const filePath = safeResolve(urlPath);
   if (!filePath) return send(res, 403, 'Forbidden');
@@ -69,7 +92,31 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  // eslint-disable-next-line no-console
-  console.log(`Dev server running at http://127.0.0.1:${PORT}/`);
-});
+function listenWithFallback(startPort, maxTries = 20) {
+  let port = startPort;
+
+  const tryListen = () => {
+    server.listen(port, '127.0.0.1', () => {
+      // eslint-disable-next-line no-console
+      console.log(`Dev server running at http://127.0.0.1:${port}/`);
+    });
+  };
+
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE' && maxTries > 0) {
+      port += 1;
+      maxTries -= 1;
+      // eslint-disable-next-line no-console
+      console.warn(`Port in use, trying ${port}...`);
+      setTimeout(tryListen, 50);
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.error(err);
+    process.exitCode = 1;
+  });
+
+  tryListen();
+}
+
+listenWithFallback(BASE_PORT);

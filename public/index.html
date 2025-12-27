@@ -7,7 +7,17 @@
     <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600" tabindex="0"></canvas>
+        <div id="uiOverlay" hidden>
+            <div id="namePanel" class="ui-panel">
+                <div class="ui-title">Enter your name</div>
+                <input id="playerNameInput" class="ui-input" type="text" maxlength="16" autocomplete="nickname" placeholder="Type a name" />
+                <button id="btnNameContinue" class="ui-btn" type="button" disabled>Continue</button>
+                <div class="ui-hint" id="startBestText">Best Score: 0 · Best Wave: 1</div>
+            </div>
+        </div>
+    </div>
     <script src="./script.js"></script>
 </body>
 </html>
