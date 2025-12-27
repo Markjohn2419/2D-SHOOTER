@@ -12,7 +12,9 @@ const BASE_CANVAS_WIDTH = canvas.width;
 const BASE_CANVAS_HEIGHT = canvas.height;
 
 function isMobileViewport() {
-    return window.matchMedia('(pointer:coarse)').matches || window.innerWidth <= 900;
+    if (window.matchMedia('(pointer:coarse)').matches) return true;
+    const minSide = Math.min(window.innerWidth, window.innerHeight);
+    return minSide <= 900;
 }
 
 function applyResponsiveScaling() {
